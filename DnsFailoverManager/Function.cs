@@ -64,11 +64,11 @@ public class Function
 
                             // SNS通知
                             await SendSnsAsync($"[FAILOVER] {monitor.TargetDNS} is unhealthy. Switched to standby system.",
-                                               $"Failover executed for {monitor.TargetDNS} at {DateTime.UtcNow:o}");
+                                               $"Failover executed for {monitor.TargetDNS} at {DateTime.Now:o}");
 
                             // ステータス更新
                             monitor.Status = "0";
-                            monitor.StatusChangedAt = DateTime.UtcNow.ToString("o");
+                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
                             batchWrite.AddPutItem(monitor);
                             Console.WriteLine($"Status updated to 0 (failover) for {monitor.TargetDNS}");
                         }
@@ -105,11 +105,11 @@ public class Function
 
                             // SNS通知
                             await SendSnsAsync($"[FAILBACK] {monitor.TargetDNS} is healthy again. Restored to primary system.",
-                                               $"Failback executed for {monitor.TargetDNS} at {DateTime.UtcNow:o}");
+                                               $"Failback executed for {monitor.TargetDNS} at {DateTime.Now:o}");
 
                             // ステータス更新
                             monitor.Status = "1";
-                            monitor.StatusChangedAt = DateTime.UtcNow.ToString("o");
+                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
                             batchWrite.AddPutItem(monitor);
                             Console.WriteLine($"Status updated to 1 (normal) for {monitor.TargetDNS}");
                         }
