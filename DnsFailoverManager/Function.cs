@@ -260,19 +260,18 @@ public class Function
     {
         try
         {
-            string topicArn = Environment.GetEnvironmentVariable("SNS_TOPIC_ARN") ?? "";
+            string snspn = Environment.GetEnvironmentVariable("SNS_PN") ?? "";
 
-            if (string.IsNullOrEmpty(topicArn))
+            if (string.IsNullOrEmpty(snspn))
             {
-                Console.WriteLine("SNS_TOPIC_ARN is not set. Skipping SNS notification.");
+                Console.WriteLine("SNS_PN is not set. Skipping SNS notification.");
                 return;
             }
 
             Console.WriteLine($"Sending SNS notification: {subject}");
             await snsClient.PublishAsync(new PublishRequest
             {
-                TopicArn = topicArn,
-                Subject = subject,
+                PhoneNumber = snspn,
                 Message = message
             });
             Console.WriteLine("SNS notification sent successfully.");
