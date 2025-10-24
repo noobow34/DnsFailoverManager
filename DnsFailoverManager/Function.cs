@@ -34,6 +34,7 @@ public class Function
             Console.WriteLine($"Fetched {monitorTargets.Count} targets.");
 
             var batchWrite = dbContext.CreateBatchWrite<DaMonitorDNS>();
+            bool needUpdate = false;
 
             foreach (var monitor in monitorTargets)
             {
@@ -48,9 +49,16 @@ public class Function
                     if (!healthy)
                     {
                         Console.WriteLine($"FAILOVER triggered for {monitor.TargetDNS}");
-
+                        string failPlace = "EC2";
                         try
                         {
+                            // ステータス更新
+                            monitor.Status = "0";
+                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
+                            batchWrite.AddPutItem(monitor);
+                            needUpdate = true;
+                            Console.WriteLine($"Status updated to 0 (failover) for {monitor.TargetDNS}");
+
                             // EC2起動
                             Console.WriteLine($"Starting EC2 instance: {monitor.FailOverInstance}");
                             await ec2Client.StartInstancesAsync(new Amazon.EC2.Model.StartInstancesRequest
@@ -59,23 +67,17 @@ public class Function
                             });
 
                             // Cloudflare DNS更新
+                            failPlace = "EDNS";
                             Console.WriteLine("Updating Cloudflare DNS for FAILOVER...");
                             await FlareSync(monitor.FailOverDNSJson ?? "");
 
                             // SNS通知
-                            await SendSnsAsync($"[FAILOVER] {monitor.TargetDNS} is unhealthy. Switched to standby system.",
-                                               $"Failover executed for {monitor.TargetDNS} at {DateTime.Now:o}");
-
-                            // ステータス更新
-                            monitor.Status = "0";
-                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
-                            batchWrite.AddPutItem(monitor);
-                            Console.WriteLine($"Status updated to 0 (failover) for {monitor.TargetDNS}");
+                            await SendSnsAsync($"Failover executed for {monitor.TargetDNS} at {DateTime.Now:o}");
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"[ERROR] Failover processing failed: {ex.Message}");
-                            await SendSnsAsync($"[ERROR] Failover failed for {monitor.TargetDNS}", ex.ToString());
+                            await SendSnsAsync($"[ERROR] Failover failed for {monitor.TargetDNS} as {failPlace}");
                         }
                     }
                     else
@@ -89,14 +91,22 @@ public class Function
                     if (healthy)
                     {
                         Console.WriteLine($"FAILBACK triggered for {monitor.TargetDNS}");
-
+                        string failPlace = "DNS";
                         try
                         {
+                            // ステータス更新
+                            monitor.Status = "1";
+                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
+                            batchWrite.AddPutItem(monitor);
+                            needUpdate = true;
+                            Console.WriteLine($"Status updated to 1 (normal) for {monitor.TargetDNS}");
+
                             // Cloudflare DNS更新
                             Console.WriteLine("Updating Cloudflare DNS for FAILBACK...");
                             await FlareSync(monitor.FailBackDNSJson ?? "");
 
                             // EC2シャットダウン
+                            failPlace = "EC2";
                             Console.WriteLine($"Stopping EC2 instance: {monitor.FailOverInstance}");
                             await ec2Client.StopInstancesAsync(new Amazon.EC2.Model.StopInstancesRequest
                             {
@@ -104,19 +114,12 @@ public class Function
                             });
 
                             // SNS通知
-                            await SendSnsAsync($"[FAILBACK] {monitor.TargetDNS} is healthy again. Restored to primary system.",
-                                               $"Failback executed for {monitor.TargetDNS} at {DateTime.Now:o}");
-
-                            // ステータス更新
-                            monitor.Status = "1";
-                            monitor.StatusChangedAt = DateTime.Now.ToString("o");
-                            batchWrite.AddPutItem(monitor);
-                            Console.WriteLine($"Status updated to 1 (normal) for {monitor.TargetDNS}");
+                            await SendSnsAsync($"Failback executed for {monitor.TargetDNS} at {DateTime.Now:o}");
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"[ERROR] Failback processing failed: {ex.Message}");
-                            await SendSnsAsync($"[ERROR] Failback failed for {monitor.TargetDNS}", ex.ToString());
+                            await SendSnsAsync($"[ERROR] Failback failed for {monitor.TargetDNS} as {failPlace}");
                         }
                     }
                     else
@@ -126,16 +129,18 @@ public class Function
                 }
             }
 
-            Console.WriteLine("Applying batch updates to DynamoDB...");
-            await batchWrite.ExecuteAsync();
-            Console.WriteLine("Batch updates completed.");
+            if (needUpdate)
+            {
+                Console.WriteLine("Applying batch updates to DynamoDB...");
+                await batchWrite.ExecuteAsync();
+                Console.WriteLine("Batch updates completed.");
+            }
 
             Console.WriteLine("=== Lambda FunctionHandler completed successfully ===");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[FATAL] Unhandled exception in FunctionHandler: {ex}");
-            await SendSnsAsync("[FATAL] Lambda unhandled exception", ex.ToString());
         }
     }
 
@@ -256,7 +261,7 @@ public class Function
         }
     }
 
-    private async Task SendSnsAsync(string subject, string message)
+    private async Task SendSnsAsync(string message)
     {
         try
         {
@@ -268,7 +273,7 @@ public class Function
                 return;
             }
 
-            Console.WriteLine($"Sending SNS notification: {subject}");
+            Console.WriteLine($"Sending SNS notification: {message}");
             await snsClient.PublishAsync(new PublishRequest
             {
                 PhoneNumber = snspn,
