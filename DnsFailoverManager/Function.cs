@@ -3,11 +3,10 @@ using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
 using Amazon.EC2;
 using Amazon.Lambda.Core;
-using Amazon.SimpleNotificationService;
-using Amazon.SimpleNotificationService.Model;
 using CloudFlareDns;
 using CloudFlareDns.Objects.Record;
 using DnsClientX;
+using System.Text;
 using System.Text.Json;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
@@ -19,7 +18,6 @@ public class Function
 
     private static readonly AmazonDynamoDBClient dbClient = new(RegionEndpoint.APNortheast1);
     private static readonly AmazonEC2Client ec2Client = new(RegionEndpoint.APNortheast1);
-    private static readonly AmazonSimpleNotificationServiceClient snsClient = new(RegionEndpoint.APNortheast1);
 
     public async Task FunctionHandler(ILambdaContext context)
     {
@@ -72,12 +70,12 @@ public class Function
                             await FlareSync(monitor.FailOverDNSJson ?? "");
 
                             // SNS’Ê’m
-                            await SendSnsAsync($"Failover executed for {monitor.TargetDNS} at {DateTime.Now:o}");
+                            await PostToSlackAsync($"Failover executed for {monitor.TargetDNS} at {DateTime.Now:o}");
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"[ERROR] Failover processing failed: {ex.Message}");
-                            await SendSnsAsync($"[ERROR] Failover failed for {monitor.TargetDNS} as {failPlace}");
+                            await PostToSlackAsync($"[ERROR] Failover failed for {monitor.TargetDNS} as {failPlace}");
                         }
                     }
                     else
@@ -114,12 +112,12 @@ public class Function
                             });
 
                             // SNS’Ê’m
-                            await SendSnsAsync($"Failback executed for {monitor.TargetDNS} at {DateTime.Now:o}");
+                            await PostToSlackAsync($"Failback executed for {monitor.TargetDNS} at {DateTime.Now:o}");
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"[ERROR] Failback processing failed: {ex.Message}");
-                            await SendSnsAsync($"[ERROR] Failback failed for {monitor.TargetDNS} as {failPlace}");
+                            await PostToSlackAsync($"[ERROR] Failback failed for {monitor.TargetDNS} as {failPlace}");
                         }
                     }
                     else
@@ -261,29 +259,13 @@ public class Function
         }
     }
 
-    private async Task SendSnsAsync(string message)
+    private async Task PostToSlackAsync(string message)
     {
-        try
-        {
-            string snspn = Environment.GetEnvironmentVariable("SNS_PN") ?? "";
-
-            if (string.IsNullOrEmpty(snspn))
-            {
-                Console.WriteLine("SNS_PN is not set. Skipping SNS notification.");
-                return;
-            }
-
-            Console.WriteLine($"Sending SNS notification: {message}");
-            await snsClient.PublishAsync(new PublishRequest
-            {
-                PhoneNumber = snspn,
-                Message = message
-            });
-            Console.WriteLine("SNS notification sent successfully.");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[ERROR] Failed to send SNS notification: {ex.Message}");
-        }
+        using HttpClient client = new();
+        var webhookUrl = Environment.GetEnvironmentVariable("WEBHOOK");
+        var payload = new { text = message };
+        var json = JsonSerializer.Serialize(payload);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        _ = await client.PostAsync(webhookUrl, content);
     }
 }
