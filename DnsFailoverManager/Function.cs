@@ -6,6 +6,7 @@ using Amazon.Lambda.Core;
 using CloudFlareDns;
 using CloudFlareDns.Objects.Record;
 using DnsClientX;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -261,11 +262,25 @@ public class Function
 
     private async Task PostToSlackAsync(string message)
     {
-        using HttpClient client = new();
-        var webhookUrl = Environment.GetEnvironmentVariable("WEBHOOK");
-        var payload = new { text = message };
+        var token = Environment.GetEnvironmentVariable("SLACK_BOT_TOKEN");
+        var channelId = Environment.GetEnvironmentVariable("SLACK_CHANNEL");
+
+        var payload = new
+        {
+            channel = channelId,
+            text = message
+        };
+
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", token);
+
         var json = JsonSerializer.Serialize(payload);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
-        _ = await client.PostAsync(webhookUrl, content);
+
+        var response = await client.PostAsync(
+            "https://slack.com/api/chat.postMessage",
+            content
+        );
     }
 }
